@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
 from unittest.mock import patch
-from lee2024 import load_recording, RecordingSession
+from lee2024 import load_matlab_file, RecordingSession
+
+# this test will currently fail because of reorganization of how RecordingSession works
 
 def test_make_recording():
     """
@@ -20,10 +22,10 @@ def test_make_recording():
         stim_reps=4,
     )
     
-    assert session.region == "V1"
+    assert session.area == "V1"
     assert session.bins.shape == (4600, 100, 96)
 
-@patch("lee2024.io.loadmatlab.loadmat")
+@patch("lee2024.io.readmatlab.load_matlab_file")
 def test_factory_logic(mock_loadmat):
     """
     Test the load_recording factory by mocking the scipy.io.loadmat return value.
@@ -37,7 +39,7 @@ def test_factory_logic(mock_loadmat):
     }
     
     # This calls the registered function via the top-level namespace
-    session = load_recording("fake_path.mat")
+    session = load_matlab_file("fake_path.mat")
     
     assert isinstance(session, RecordingSession)
     assert session.incl_subj == "MonkeyB"
