@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+import warnings
+
 from dataclasses import dataclass
 from typing      import List, Union
 
@@ -11,7 +13,7 @@ from ..registry import registry
 @dataclass
 class SpikeAverages:
     """Stores averaged neural responses indexed by some grouping."""
-    # Dictionary mapping 'family_name' -> np.ndarray [Bins x Channels]
+    # Dictionary mapping 'family_name' -> np.ndarray [spikes x Channels]
     avgs: dict[str, np.ndarray]
     area: str
     subj: Union[str, List[str]]
@@ -20,125 +22,86 @@ class SpikeAverages:
     def get_group(self, name: str):
         return self.avgs.get(name)
 
+
 @registry.register
-def avg_by_coherence(session) -> 'SpikeAverages':
+def avg_by_stim(
+    session, 
+    stim_col: Union[str, int], 
+    over_neurons: bool
+) -> 'SpikeAverages':
     """
-    Groups neural 'bins' by the 'coherence' column in session.stim 
+    Groups neural 'spikes' by a named or index column in session.stim 
     and returns a SpikeAverages object.
+
+    Parameters
+    ----------
+    session: RecordingSessions
+        spiking data to average over
+    
+    stim_col: Union[str, int]
+        either name or index of column in `stim` to do grouping over
+
+    over_neurons: bool, optional
+        whether to also average over neurons, default=True
     """
 
-    coherences = session.stim[:, 0] 
-    unique_coherences = np.unique(coherences)
+    if isinstance(stim_col, int):
+        grps = session.stim[:, stim_col]
+    else: 
+        grps = session.stim[stim_col] 
+    grps = grps.to_numpy()
+    unique_grps = np.unique(grps)
+
+    if len(unique_grps) > len(grps) // 2: 
+        warnings.warn(
+            "Number of unique groups exceeds half of total rows", UserWarning)
+
+    grps_avgs = {}
     
-    coherence_map = {}
-    
-    for i in unique_coherences:
-        # 1. Find indices where the family matches
-        indices = np.where(coherences == i)[0]
+    for i in unique_grps:
+        indices = np.where(grps == i)[0]
+        family_data = session.spikes[indices, :, :]
         
-        # 2. Extract those samples: [Matches x Bins x Channels]
-        family_data = session.bins[indices, :, :]
-        
-        # 3. Average across the samples (axis 0)
-        # Result is [Bins x Channels]
-        coherence_map[str(i)] = np.mean(family_data, axis=0)
+        if over_neurons: 
+            # average across samples and neurons (axes [0, 2])
+            grps_avgs[str(i)] = np.mean(family_data, axis=(0, 2))
+        else: 
+            # average across the samples (axis 0): [spikes x Channels]
+            grps_avgs[str(i)] = np.mean(family_data, axis=0) 
         
     return SpikeAverages(
-        avgs=coherence_map,
+        avgs=grps_avgs,
         area=session.area,
         subj=session.subj,
         grouping="coherence",
     )
 
 @registry.register
-def avg_by_famsamp(session) -> 'SpikeAverages':
+def avg_sessions(
+    sessions: dict, 
+    stim_col: Union[str, int], 
+    over_neurons: bool = False
+) -> dict: 
     """
-    Groups neural 'bins' by the 'famsamp' column in session.stim 
-    and returns a SpikeAverages object.
-    """
+    Wrapper for applying `avg_by_stim` over a dictionary of 
+    `RecordingSession` instances
 
-    temp = pd.DataFrame(session.stim)
-    temp.columns = ["coherence", "family", "id", "id_blank", "fam", "samp"]
-    temp = temp.assign(famsamp=lambda df: df.groupby(["family", "id"]).ngroup())
-    famsamps = temp[["famsamp"]].to_numpy().flatten()
-    unique_famsamps = np.unique(famsamps)
+    Parameters
+    ----------
+    sessions: dict
+        dictionary of RecordingSessions, such as the one produced by 
+        `load_matlab_dir`
     
-    famsamp_map = {}
-    
-    for i in unique_famsamps:
-        # 1. Find indices where the family matches
-        indices = np.where(famsamps == i)[0]
-        
-        # 2. Extract those samples: [Matches x Bins x Channels]
-        family_data = session.bins[indices, :, :]
-        
-        # 3. Average across the samples (axis 0)
-        # Result is [Bins x Channels]
-        famsamp_map[str(i)] = np.mean(family_data, axis=0)
-        
-    return SpikeAverages(
-        avgs=famsamp_map,
-        area=session.area,
-        subj=session.subj,
-        grouping="famsamp",
-    )
+    stim_col: Union[str, int]
+        either name or index of column in `stim` to do grouping over
 
-@registry.register
-def avg_by_family(session) -> 'SpikeAverages':
+    over_neurons: bool, optional
+        whether to also average over neurons, default=True
     """
-    Groups neural 'bins' by the 'family' column in session.stim 
-    and returns a SpikeAverages object.
-    """
-    # Assume 'stim' is [Samples x Descriptors] 
-    # and column 0 is the 'family' string or ID
-    families = session.stim[:, 1] 
-    unique_families = np.unique(families)
+    sessions_avgs = {}
+    # TODO: shorten this with list comprehension
+    for k, sesh in sessions.items(): 
+        sessions_avgs[k] = avg_by_stim(sesh, stim_col, over_neurons)
     
-    family_map = {}
-    
-    for fam in unique_families:
-        # 1. Find indices where the family matches
-        indices = np.where(families == fam)[0]
-        
-        # 2. Extract those samples: [Matches x Bins x Channels]
-        family_data = session.bins[indices, :, :]
-        
-        # 3. Average across the samples (axis 0)
-        # Result is [Bins x Channels]
-        family_map[str(fam)] = np.mean(family_data, axis=0)
-        
-    return SpikeAverages(
-        avgs=family_map,
-        area=session.area,
-        subj=session.subj,
-        grouping="family",
-    )
-
-@registry.register
-def avg_by_id(session) -> 'SpikeAverages':
-    """
-    Groups neural 'bins' by the 'id' column in session.stim 
-    and returns a SpikeAverages object.
-    """
-    ids = session.stim[:, 2] 
-    unique_ids = np.unique(ids)
-    
-    id_map = {}
-    
-    for i in unique_ids:
-        # 1. Find indices where the family matches
-        indices = np.where(unique_ids == i)[0]
-        
-        # 2. Extract those samples: [Matches x Bins x Channels]
-        id_data = session.bins[indices, :, :]
-        
-        # 3. Average across the samples (axis 0)
-        # Result is [Bins x Channels]
-        id_map[str(i)] = np.mean(id_data, axis=0)
-        
-    return SpikeAverages(
-        avgs=id_map,
-        area=session.area,
-        subj=session.subj,
-        grouping="id",
-    )
+    return sessions_avgs 
+ 

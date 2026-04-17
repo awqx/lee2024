@@ -11,8 +11,8 @@ class RecordingSession:
     """
     A single neural recording session from Lee et al. (2024)
     """
-    # neural data: [stimuli x bins x channels]
-    bins: np.ndarray
+    # neural data: [stimuli x spikes x channels]
+    spikes: np.ndarray
 
     # subject ID
     subj: Union[str, List[str]]

@@ -1,5 +1,6 @@
 import importlib
 import pkgutil
+import traceback
 
 class ObjectRegistry:
     def __init__(self):
@@ -14,16 +15,25 @@ class ObjectRegistry:
         if self._is_initialized:
             return self.objects
 
-        print(f"DEBUG: Starting discovery for {package_name}...")
+        # print(f"DEBUG: Starting discovery for {package_name}...")
         for sub in sub_packages:
             full_path = f"{package_name}.{sub}"
+
+            # load parent module
             try:
                 pkg = importlib.import_module(full_path)
-                for _, mod_nm, _ in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + "."):
-                    print(f"  > Importing module: {mod_nm}")
-                    importlib.import_module(mod_nm)
             except Exception as e:
-                print(f"  ! Error in {sub}: {e}")
+                print(f"!! ERROR loading subpackage {full_path}:")
+                traceback.print_exc()
+                continue
+
+            # load individual methods
+            for _, mod_nm, _ in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + "."):
+                # print(f"> Importing module: {mod_nm}")
+                try:
+                    importlib.import_module(mod_nm)
+                except Exception as e:
+                    print(f"!! ERROR importing {mod_nm}:")
 
         self._is_initialized = True
         return self.objects

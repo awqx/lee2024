@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import pandas as pd
@@ -27,7 +29,6 @@ def clean_stimuli(stim: np.ndarray) -> np.ndarray:
         .drop(columns=["coherence_t3", "x5"])
         .assign(repetition=lambda df: df.groupby(["coherence", "family", "id", "id_blank"]).cumcount() + 1)
         .assign(famsamp=lambda df: df.groupby(["family", "id"]).ngroup() + 1)
-        .to_numpy()
     )
 
 @registry.register
@@ -35,7 +36,7 @@ def load_matlab_file(f: str) -> RecordingSession:
     f_info   = file_info(os.path.basename(f))
     mat_data = loadmat(f, simplify_cells=True)
     return RecordingSession(
-        bins=mat_data['bins'], 
+        spikes=mat_data['bins'], 
         subj=mat_data['incl_subj'], 
         n_subj=f_info['n_subj'],
         stim=clean_stimuli(mat_data['save_label']),
@@ -45,7 +46,10 @@ def load_matlab_file(f: str) -> RecordingSession:
     )
 
 @registry.register
-def load_matlab_dir(dir: str, silent: bool = False) -> dict:
+def load_matlab_dir(
+    dir: str, 
+    silent: bool = False, 
+    remove_neurons : bool = True) -> dict:
     """ 
     Loads entire directory of MATLAB files into a dictionary where file
     names are keys of RecordingSessions.
@@ -63,4 +67,10 @@ def load_matlab_dir(dir: str, silent: bool = False) -> dict:
         except Exception as e:
             print(f"Failed to load {f}: {e}")
     
+    # remove missing neurons
+    if remove_neurons: 
+        for _, sesh in recordings.items(): 
+            spikes_ = sesh.spikes
+            sesh.spikes = spikes_[:, :, np.where(np.mean(np.isnan(spikes_), axis=(0, 1)) < 0.01)[0]]
+        
     return recordings
